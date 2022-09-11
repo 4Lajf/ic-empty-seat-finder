@@ -10,7 +10,7 @@ import StealthPlugin from 'puppeteer-extra-plugin-stealth'
 import AdblockerPlugin from 'puppeteer-extra-plugin-adblocker'
 puppeteer.use(StealthPlugin())
 puppeteer.use(AdblockerPlugin({ blockTrackers: true }))
-let isNextIteration = false, loops = 0
+let isNextIteration = false, loops = 0, debug = false;
 let finalSeats = [], seatFinder = null, page, timer, timeouts = 2;
 
 
@@ -29,6 +29,11 @@ function sleep(milliseconds) {
 }
 
 (async () => {
+    let today = new Date();
+    let timeHours = today.getHours()
+    let timeMinutes = today.getMinutes()
+    let dateDay = today.getDay()
+
     /* //First day of each month IC has service time from 23:45 to 1:00
     if (dateDay === 1) {
         if (timeHours === 23 && timeMinutes >= 45 <= 60) {
@@ -68,7 +73,7 @@ function sleep(milliseconds) {
         timer = new Timeout();
         try {
             await Promise.race([
-                searchForSeats(destFrom, destTo, daysDiference, hour, minute, false),
+                seatFinder = searchForSeats(destFrom, destTo, daysDiference, hour, minute, true),
                 timer.set(30000, 'Timeout')
             ]);
         } catch (error) {
@@ -79,7 +84,7 @@ function sleep(milliseconds) {
                 return;
             }
             console.log(`Wyszukiwanie wyczerpało limit czasu. Ponawiam... [${timeouts}/3]`);
-            await reRun(destFrom, destTo, date, hour, minute)
+            await reRun(destFrom, destTo, date, hour, minute, debug)
         } finally {
             timer.clear();
             timer = null
@@ -87,7 +92,7 @@ function sleep(milliseconds) {
     }
 
     const browser = await puppeteer.launch({ headless: true })
-    const searchForSeats = async (DEST_FROM, DEST_TO, DATE, HOUR_DATA, MINUTE_DATA) => {
+    const searchForSeats = async (DEST_FROM, DEST_TO, DATE, HOUR_DATA, MINUTE_DATA, DEBUG) => {
         page = await browser.newPage()
         await page.setViewport({ width: 800, height: 600 })
         await page.goto('https://bilkom.pl/')
@@ -115,6 +120,7 @@ function sleep(milliseconds) {
         await page.waitForSelector('input[name="date"]')
         await page.click('input[name="date"]')
         await page.click(`td[data-day="${DATE}.2022"]`)
+
         await page.waitForSelector('.timepicker-hour')
         await page.click('.timepicker-hour')
         await page.evaluate(async (HOUR_DATA) => {
@@ -158,8 +164,10 @@ function sleep(milliseconds) {
             const trainNumber = await page.evaluate(() => {
                 return document.querySelector('.hidden.main-carrier').innerText
             });
+            console.log(trainNumber)
             try {
                 if (!/IC ....[0-9]/g.test(trainNumber)) {
+                    console.log(5)
                     throw { name: 'InvalidTrainType', desc: 'Wybrany pociąg nie jest pociągiem PKP Intercity', fatal: true }
                 }
             } catch (error) {
@@ -175,6 +183,7 @@ function sleep(milliseconds) {
                 let trainStations = [], toDel
                 rawStations = rawStations[0].innerText.match(/([^\r\n])[^\r\n]*[\r\n]*/gi)
                 for (let i = 0; i < rawStations.length - 3; i++) {
+                    console.log(i, rawStations[i], rawStations.length)
                     if (i % 2 !== 0 && i !== 1 && i !== rawStations.length - 1) {
                         toDel = rawStations[i].match(/.\b(\w+)\W*$/gi)[0]
                         rawStations[i] = rawStations[i].replace(toDel, '')
@@ -211,28 +220,39 @@ function sleep(milliseconds) {
         await page.click('#go-to-summary')
         await page.waitForSelector('.form-content-wrapper')
 
-        const seatInfo = await page.evaluate(() => {
+        const seatInfo = await page.evaluate((DEBUG) => {
             const fullInfo = document.querySelector('.text-indent').innerText.replace(/\s+/g, ' ').trim()
+            console.log(fullInfo)
 
             const trainClass = fullInfo.match(/klasa../g)[0]
             const trainCoach = fullInfo.match(/wagon../g)[0] //trim whitespace
             const trainSeat = fullInfo.match(/miejsca: ../g)[0] //trim whitespace
+            console.log(trainClass, trainCoach, trainSeat)
+            /* DEBUG */
+            if (DEBUG === true) {
+                return {
+                    trainClass: '2 klasa',
+                    trainCoach: 'brak gwarancji',
+                    trainSeat: 'brak gwarancji'
+                }
+            }
+            /* END */
             return {
                 trainClass: trainClass,
                 trainCoach: trainCoach,
                 trainSeat: trainSeat
             }
-        })
+        }, DEBUG)
         isNextIteration = true;
-        seatFinder = { seatInfo: seatInfo, trainRoute: trainRoute }
-        return
+        console.log({ seatInfo: seatInfo, trainRoute: trainRoute })
+        return { seatInfo: seatInfo, trainRoute: trainRoute }
     }
     page = null
     timer = new Timeout();
 
     try {
         await Promise.race([
-            searchForSeats(destFrom, destTo, date, hour, minute, true),
+            seatFinder = searchForSeats(destFrom, destTo, date, hour, minute, true),
             timer.set(30000, 'Timeout')
         ]);
     } catch (error) {
@@ -243,7 +263,7 @@ function sleep(milliseconds) {
             return;
         }
         console.log(`Wyszukiwanie wyczerpało limit czasu. Ponawiam... [${timeouts}/3]`);
-        await reRun(destFrom, destTo, date, hour, minute)
+        await reRun(destFrom, destTo, date, hour, minute, debug)
     } finally {
         if (timer) {
             timer.clear();
@@ -253,6 +273,7 @@ function sleep(milliseconds) {
 
     await page.close()
     if (!seatFinder) { return; }
+
     let seatInfo = seatFinder.seatInfo,
         trainRoute = seatFinder.trainRoute,
         trainCoach = seatInfo.trainCoach, trainSeat = seatInfo.trainSeat, trainClass = seatInfo.trainClass;
@@ -272,12 +293,19 @@ ${trainCoach} | ${trainSeat} | ${trainClass}
         while (trainCoach === 'brak gwarancji' || trainSeat === 'brak gwarancji') {
             destTo = trainRoute[trainRoute.length - loops - 1]
             loops++
+            /* DEBUG */
+            if (loops >= 2) {
+                debug = false
+            } else {
+                debug = true
+            }
+            /* END */
             page = null
 
             timer = new Timeout();
             try {
                 await Promise.race([
-                    seatFinder = searchForSeats(destFrom, destTo, date, hour, minute, false),
+                    seatFinder = searchForSeats(destFrom, destTo, date, hour, minute, true),
                     timer.set(30000, 'Timeout')
                 ]);
             } catch (error) {
@@ -288,7 +316,7 @@ ${trainCoach} | ${trainSeat} | ${trainClass}
                     return;
                 }
                 console.log(`Wyszukiwanie wyczerpało limit czasu. Ponawiam... [${timeouts}/3]`);
-                await reRun(destFrom, destTo, date, hour, minute)
+                await reRun(destFrom, destTo, date, hour, minute, debug)
             } finally {
                 timer.clear();
                 timer = null
