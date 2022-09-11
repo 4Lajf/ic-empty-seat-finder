@@ -1,17 +1,18 @@
+let destFrom = 'Poznań Główny',
+destTo = 'Szczecinek',
+date = '11.09',
+hour = '17',
+minute = '30';
+
 import puppeteer from 'puppeteer-extra'
 import Timeout from 'await-timeout'
 import StealthPlugin from 'puppeteer-extra-plugin-stealth'
 import AdblockerPlugin from 'puppeteer-extra-plugin-adblocker'
-
 puppeteer.use(StealthPlugin())
 puppeteer.use(AdblockerPlugin({ blockTrackers: true }))
-let isNextIteration = false, destFrom, destTo, date, hour, minute, loops = 0, debug = false;
+let isNextIteration = false, loops = 0, debug = false;
 let finalSeats = [], seatFinder = null, page, timer, timeouts = 2;
-destFrom = 'Poznań Główny'
-destTo = 'Szczecinek'
-date = '11.09'
-hour = '17'
-minute = '30'
+
 
 /* process.on('unhandledRejection', reason => {
     console.log(`An exception has occured.\n${reason}
